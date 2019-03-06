@@ -1,5 +1,7 @@
 #!/bin/bash
 
+backupIdStr="_bckup_"
+
 # function calls pass their result
 # into this variable
 ret=''
@@ -20,9 +22,36 @@ function debugPrint {
 #
 function getDirsInPeriod {
   ret=$(find "$1" -mindepth 1 -maxdepth 1 \
-                  -name "*$2" -type d -newermt "$3" \! -newermt "$4") 
+                  -name "*${backupIdStr}$2" -type d -newermt "$3" \! -newermt "$4") 
 }
 
+# getTimeDiffToNow
+# purpose
+#   get the elapsed time in minutes
+#   since the last modification of
+#   the directory
+# arguments
+#   $1 directory
+function getTimeDiffToNow {
+  local refDirTime=$(stat -c %Y "$1")
+  local curTime=$(date +"%s")
+  ret=$(( (curTime-refDirTime)/60 ))
+}
+
+
+# getTimeDiffBetweenDirs
+# purpose
+#   get the time difference in minutes
+#   between two directories
+# arguments
+#   $1 older directory
+#   $2 newer directory
+function getTimeDiffBetweenDirs {
+  local refDirTime=$(stat -c %Y "$1")
+  local newDirTime=$(stat -c %Y "$2")
+  ret=$(( ($newDirTime - $refDirTime) / 60 ))
+}
+  
 
 # getNumberOfDirsInChain
 # purpose
@@ -34,7 +63,36 @@ function getDirsInPeriod {
 #
 function getNumberOfDirsInChain {
   ret=$(find "$1" -mindepth 1 -maxdepth 1 \
-                   -name "*$2" -type d -printf . | wc -c)
+                   -name "*${backupIdStr}$2" -type d -printf . | wc -c)
+}
+
+
+# getNewerDir
+# purpose
+#   return the directory that was
+#   created right after the directory
+#   passed as argument
+# arguments
+#   $1 base directory for search
+#   $2 reference directory
+function getNewerDir {
+  ret=$(find "$1" -mindepth 1 -maxdepth 1 \
+                  -name "*${backupIdStr}*" \
+                  -newer "$2" -type d -printf "%T@ %p\n" \
+                  | sort -n | cut -f2 -d' ' | head -n1)
+}
+
+# getNewestDir
+# purpose
+#   get the newest backup dir independent
+#   of the chain in which chain it is located
+# arguments
+#   $1 base directory for search
+function getNewestDir {
+  ret=$(find "$1" -mindepth 1 -maxdepth 1 \
+                  -name "*${backupIdStr}*" \
+                  -type d -printf "%T@ %p\n" \
+                  | sort -n | cut -f2 -d' ' | tail -n1)
 }
 
 
@@ -48,8 +106,8 @@ function getNumberOfDirsInChain {
 # 
 function getNewestDirInChain {
   ret=$(find "$1" -mindepth 1 -maxdepth 1 \
-                  -name "*$2" -type d -printf "%T@ %p\n" \
-                  | sort -n | cut -f2 -d' ' | tail -n1 )
+                  -name "*${backupIdStr}$2" -type d -printf "%T@ %p\n" \
+                  | sort -n | cut -f2 -d' ' | tail -n1 ) 
 }
 
 
@@ -64,7 +122,7 @@ function getNewestDirInChain {
 #
 function getExpiredDirInChain {
   ret=$(find "$1" -mindepth 1 -maxdepth 1 \
-                  -name "*$2" -type d -mmin "+$3" \
+                  -name "*${backupIdStr}$2" -type d -mmin "+$3" \
                   -printf "%T@ %p\n" | sort -n \
                   | cut -f2 -d' ' | head -n -1 | head -n1 ) 
 }
@@ -81,11 +139,13 @@ function getExpiredDirInChain {
 #   
 function addBackupToChain {
   ret=''
-  getNewestDirInChain "$1" "$2"
+  getNewestDir "$1" "$2"
   local lastBackupDir="$ret"
   local sourceDir="$3"
-  local newBackupDir="$1/$(date +%Y%m%d_%H%M%S)_$2" 
-  cp -al "$lastBackupDir" "$newBackupDir"
+  local newBackupDir="$1/$(date +%Y%m%d_%H%M%S)${backupIdStr}$2" 
+  if [ -d "$lastBackupDir" ]; then
+    cp -al "$lastBackupDir" "$newBackupDir"
+  fi
   rsync -a --delete "$sourceDir/" "$newBackupDir"
   local rsync_ret=$?
   touch "$newBackupDir"
@@ -110,7 +170,9 @@ function updateBackupChain {
   local backupRootDir="$1"
   local chain="$2"
   getNewestDirInChain $backupRootDir "$chain"    
-  local lastBackupDir="$ret"
+  local lastBackupDir="$ret"  # in the chain
+  getNewestDir "$backupRootDir" "$lastBackupDir"
+  local newestBackupDir="$ret"  # in folder 
   local interval_day="$3"
   local retention_day="$4"
   local sourceDir="$5"
@@ -139,27 +201,33 @@ function updateBackupChain {
   local interval_min=`awk -v x="$interval_day" 'BEGIN {printf "%.0f", (x * 24*60)}'`
   local retention_min=`awk -v x="$retention_day" 'BEGIN {printf "%.0f", (x * 24*60)}'`
 
-    echo "interval in days: $interval_day"
-    echo "interval in min: $interval_min"
-    echo "backupdir: $backupRootDir"
-    echo "chain: $chain"
-    echo "retention: $retention_min"
-    echo "sourcedir: $sourceDir"
-
-  local backupCreationTime="$(date -d "$(stat -c %y "$lastBackupDir")" +"%Y-%m-%d %H:%M:%S")"
+  local backupCreationTime=''
+  if [ -d "$lastBackupDir" ]; then
+    backupCreationTime="$(date -d "$(stat -c %y "$lastBackupDir")" +"%Y-%m-%d %H:%M:%S")"
+  fi
   debugPrint "`date +\"%Y-%m-%d %H:%M:%S\"`"
   debugPrint "Starting backup routine..."
   debugPrint "# --- info ---" 
   debugPrint "# backup root directory: $backupRootDir"
   debugPrint "# current chain: $chain"
   debugPrint "# last backup in chain: $lastBackupDir" 
+  debugPrint "# last backup overall: $newestBackupDir"
   debugPrint "# created on: $backupCreationTime"
   debugPrint "# backup interval: $interval_min min"
   debugPrint "# backup retention: $retention_min min"
   debugPrint "# --- actions ---"
 
-  if test "`find $lastBackupDir -maxdepth 0 -mmin +$interval_min`" -o \
-          -z "$lastBackupDir"; then
+  local shouldUpdate=1
+  if [ -d "$lastBackupDir" ]; then
+    getTimeDiffToNow "$lastBackupDir"
+    local elapsedTime=$ret
+    if [ "$elapsedTime" -lt "$interval_min" ]; then
+      debugPrint "# last backup in chain too recent, no new backup will be created"
+      shouldUpdate=0
+    fi
+  fi
+
+  if [ "$shouldUpdate" -eq 1 ]; then
     debugPrint "# it's time, creating a new backup..."
     addBackupToChain $backupRootDir $chain $sourceDir   
     if [ $? -ne 0 ]; then
@@ -178,8 +246,6 @@ function updateBackupChain {
         return 1
       fi
     fi
-  else
-    debugPrint "# last backup is too recent, nothing to do"
   fi
   debugPrint "Returning from backup routine..."
   return 0
