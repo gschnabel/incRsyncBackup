@@ -331,13 +331,27 @@ function main {
 
   else
     echo
-    echo "user_backup.bash backup {backupdir} {chain} {interval} {retention} {sourcedir}"
+    echo "./incRsyncBackup.bash backup {backupdir} {chain} {interval} {retention} {sourcedir}"
+    echo "./incRsyncBackup.bash backupall {backupdir} {chain} {interval} {retention} {sourcedir}"
     echo 
     echo "{backupdir}      the directory to store the backups"
     echo "{chain}          the name of the chain to update"
     echo "{interval}       interval between consecutive backups in days"
     echo "{retention}      retention time of backups in days"
     echo "{sourcedir}      the directory that should be backed up"
+    echo
+    echo "The second argument being either 'backup' or 'backupall' determines the backup mode:"
+    echo
+    echo "(backup):        The content of {sourcedir} will be backed up in {backupdir}."
+    echo "                 Subdirectories in {backupdir} contain the content of {sourcedir}"
+    echo "                 as it was at different points in time." 
+    echo
+    echo "(backupall):     For each first-level subdirectory of {sourcedir} a directory with"
+    echo "                 the same name will be created in {backupdir}. Each first-level"
+    echo "                 subdirectory in {sourcedir} will then be backed up to the corresponding"
+    echo "                 subdirectory in {backupdir} using option 'backup'. In other words,"
+    echo "                 with the option 'backupall' a loop over all the subdirectories in"
+    echo "                 {sourcedir} is performed using the option 'backup'."
   fi
 }
 
